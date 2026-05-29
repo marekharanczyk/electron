@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Marek Haranczyk <marek@here.io>
+Date: Fri, 29 May 2026 09:18:02 +0200
+Subject: chore: Refactor process lookup.
+
+Expose a parameter to include speculative render frame host during interation
+of frames handled by render process host. 
+
+
+diff --git a/content/browser/renderer_host/render_process_host_impl.cc b/content/browser/renderer_host/render_process_host_impl.cc
+index 010cc5bb08319..2619bdf09884d 100644
+--- a/content/browser/renderer_host/render_process_host_impl.cc
++++ b/content/browser/renderer_host/render_process_host_impl.cc
+@@ -2927,6 +2927,12 @@ int RenderProcessHostImpl::GetRenderFrameHostCount() const {
+ 
+ void RenderProcessHostImpl::ForEachRenderFrameHost(
+     base::FunctionRef<void(RenderFrameHost*)> on_render_frame_host) {
++  ForEachRenderFrameHost(on_render_frame_host, false);
++}
++
++void RenderProcessHostImpl::ForEachRenderFrameHost(
++    base::FunctionRef<void(RenderFrameHost*)> on_render_frame_host,
++    bool include_speculative) {
+   // TODO(crbug.com/40487508): This is also implemented in
+   // MockRenderProcessHost. When changing something here, don't forget to
+   // consider whether that change is also needed in
+@@ -2941,7 +2947,7 @@ void RenderProcessHostImpl::ForEachRenderFrameHost(
+ 
+     // Speculative RFHs are not exposed to //content embedders, so we have to
+     // explicitly check them here to avoid leaks.
+-    if (rfh->lifecycle_state() ==
++    if (!include_speculative && rfh->lifecycle_state() ==
+         RenderFrameHostImpl::LifecycleStateImpl::kSpeculative) {
+       continue;
+     }
+diff --git a/content/browser/renderer_host/render_process_host_impl.h b/content/browser/renderer_host/render_process_host_impl.h
+index 3f5d4fc3777ae..3e5fec733bc58 100644
+--- a/content/browser/renderer_host/render_process_host_impl.h
++++ b/content/browser/renderer_host/render_process_host_impl.h
+@@ -327,6 +327,9 @@ class CONTENT_EXPORT RenderProcessHostImpl
+       bool is_outermost_main_frame) override;
+   void ForEachRenderFrameHost(
+       base::FunctionRef<void(RenderFrameHost*)> on_render_frame_host) override;
++  void ForEachRenderFrameHost(
++      base::FunctionRef<void(RenderFrameHost*)> on_render_frame_host,
++      bool include_speculative) override;
+   void IncrementWorkerRefCount() override;
+   void DecrementWorkerRefCount() override;
+   void IncrementPendingReuseRefCount() override;
+diff --git a/content/public/browser/render_process_host.h b/content/public/browser/render_process_host.h
+index 07f1957a92878..4c1e5f3aa979e 100644
+--- a/content/public/browser/render_process_host.h
++++ b/content/public/browser/render_process_host.h
+@@ -535,6 +535,9 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Listener,
+   // process. Note that speculative RenderFrameHosts will be skipped.
+   virtual void ForEachRenderFrameHost(
+       base::FunctionRef<void(RenderFrameHost*)> on_frame) = 0;
++  virtual void ForEachRenderFrameHost(
++      base::FunctionRef<void(RenderFrameHost*)> on_frame,
++      bool include_speculative) = 0;
+ 
+   // Register/unregister a RenderFrameHost instance whose frame lives in this
+   // process. RegisterRenderFrameHost and UnregisterRenderFrameHost are the
+diff --git a/content/public/test/mock_render_process_host.cc b/content/public/test/mock_render_process_host.cc
+index 695c598d857e4..c16c769b2a17c 100644
+--- a/content/public/test/mock_render_process_host.cc
++++ b/content/public/test/mock_render_process_host.cc
+@@ -470,6 +470,12 @@ void MockRenderProcessHost::UnregisterRenderFrameHost(
+ 
+ void MockRenderProcessHost::ForEachRenderFrameHost(
+     base::FunctionRef<void(RenderFrameHost*)> on_render_frame_host) {
++  ForEachRenderFrameHost(on_render_frame_host, false);
++}
++
++void MockRenderProcessHost::ForEachRenderFrameHost(
++    base::FunctionRef<void(RenderFrameHost*)> on_render_frame_host,
++    bool include_speculative) {
+   // TODO(crbug.com/40487508): Clean up MockRenderProcessHost usage and merge
+   // this implementation with RenderProcessHostImpl::ForEachRenderFrameHost().
+   for (auto rfh_id : render_frame_host_id_set_) {
+@@ -483,7 +489,7 @@ void MockRenderProcessHost::ForEachRenderFrameHost(
+ 
+     // Speculative RFHs are not exposed to //content embedders, so we have to
+     // explicitly check them here to avoid leaks.
+-    if (rfh->lifecycle_state() ==
++    if (!include_speculative && rfh->lifecycle_state() ==
+         RenderFrameHostImpl::LifecycleStateImpl::kSpeculative) {
+       continue;
+     }
+diff --git a/content/public/test/mock_render_process_host.h b/content/public/test/mock_render_process_host.h
+index 8e99d94e3c010..0eded6518186d 100644
+--- a/content/public/test/mock_render_process_host.h
++++ b/content/public/test/mock_render_process_host.h
+@@ -172,6 +172,9 @@ class MockRenderProcessHost : public RenderProcessHost {
+   void DisableRefCounts() override;
+   void ForEachRenderFrameHost(
+       base::FunctionRef<void(RenderFrameHost*)> on_render_frame_host) override;
++  void ForEachRenderFrameHost(
++      base::FunctionRef<void(RenderFrameHost*)> on_render_frame_host,
++      bool include_speculative) override;
+   void RegisterRenderFrameHost(
+       const GlobalRenderFrameHostId& render_frame_host_id,
+       bool is_outermost_main_frame) override;

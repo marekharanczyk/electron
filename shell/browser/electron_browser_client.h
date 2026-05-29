@@ -67,10 +67,6 @@ class ElectronBrowserClient : public content::ContentBrowserClient,
   using Delegate = content::ContentBrowserClient;
   void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 
-  // Returns the WebContents for pending render processes.
-  content::WebContents* GetWebContentsFromProcessID(
-      content::ChildProcessId process_id);
-
   NotificationPresenter* GetNotificationPresenter();
 
   void WebNotificationAllowed(content::RenderFrameHost* rfh,
@@ -361,13 +357,9 @@ class ElectronBrowserClient : public content::ContentBrowserClient,
       const GURL& url,
       content::RenderFrameHost* rfh) const;
 
-  bool IsRendererSubFrame(content::ChildProcessId process_id) const;
-
-  // pending_render_process => web contents.
-  base::flat_map<content::ChildProcessId, content::WebContents*>
-      pending_processes_;
-
-  base::flat_set<content::ChildProcessId> renderer_is_subframe_;
+  // Returns the WebContents for pending render processes.
+  content::WebContents* GetWebContentsFromProcessID(
+      content::ChildProcessId process_id, bool *is_subframe);
 
   std::unique_ptr<PlatformNotificationService> notification_service_;
   std::unique_ptr<NotificationPresenter> notification_presenter_;

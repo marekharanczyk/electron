@@ -376,12 +376,24 @@ ElectronBrowserClient::~ElectronBrowserClient() {
 }
 
 content::WebContents* ElectronBrowserClient::GetWebContentsFromProcessID(
-    content::ChildProcessId process_id) {
-  // If the process is a pending process, we should use the web contents
-  // for the frame host passed into RegisterPendingProcess.
-  const auto iter = pending_processes_.find(process_id);
-  if (iter != std::end(pending_processes_))
-    return iter->second;
+    content::ChildProcessId process_id,
+    bool* is_subframe) {
+  *is_subframe = false;
+  content::WebContents* found_web_contents = nullptr;
+  auto* host = content::RenderProcessHost::FromID(process_id);
+  if (host) {
+    host->ForEachRenderFrameHost(
+        [&found_web_contents, &is_subframe](content::RenderFrameHost* rfh) {
+          auto* web_contents = content::WebContents::FromRenderFrameHost(rfh);
+          if (web_contents) {
+            found_web_contents = web_contents;
+            *is_subframe = rfh->GetParent();
+          }
+        },
+        true);
+  }
+  if (found_web_contents)
+    return found_web_contents;
 
   // Certain render process will be created with no associated render view,
   // for example: ServiceWorker.
@@ -479,15 +491,6 @@ bool ElectronBrowserClient::WebPreferencesNeedUpdateForColorRelatedStateChanges(
 void ElectronBrowserClient::RegisterPendingSiteInstance(
     content::RenderFrameHost* rfh,
     content::SiteInstance* pending_site_instance) {
-  // Remember the original web contents for the pending renderer process.
-  auto* web_contents = content::WebContents::FromRenderFrameHost(rfh);
-  const auto pending_process_id = pending_site_instance->GetProcess()->GetID();
-  pending_processes_[pending_process_id] = web_contents;
-
-  if (rfh->GetParent())
-    renderer_is_subframe_.insert(pending_process_id);
-  else
-    renderer_is_subframe_.erase(pending_process_id);
 }
 
 void ElectronBrowserClient::AppendExtraCommandLineSwitches(
@@ -612,13 +615,13 @@ void ElectronBrowserClient::AppendExtraCommandLineSwitches(
 
     content::ChildProcessId unsafe_process_id =
         content::ChildProcessId::FromUnsafeValue(process_id);
+    bool is_subframe = false;
     content::WebContents* web_contents =
-        GetWebContentsFromProcessID(unsafe_process_id);
+        GetWebContentsFromProcessID(unsafe_process_id, &is_subframe);
     if (web_contents) {
       auto* web_preferences = WebContentsPreferences::From(web_contents);
       if (web_preferences)
-        web_preferences->AppendCommandLineSwitches(
-            command_line, IsRendererSubFrame(unsafe_process_id));
+        web_preferences->AppendCommandLineSwitches(command_line, is_subframe);
     }
 
     // Service worker processes should only run preloads if one has been
@@ -978,9 +981,6 @@ void ElectronBrowserClient::WebNotificationAllowed(
 
 void ElectronBrowserClient::RenderProcessHostDestroyed(
     content::RenderProcessHost* host) {
-  content::ChildProcessId process_id = host->GetID();
-  pending_processes_.erase(process_id);
-  renderer_is_subframe_.erase(process_id);
   host->RemoveObserver(this);
 }
 
